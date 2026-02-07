@@ -14,8 +14,12 @@ app.use(passport.initialize());
 const NETLIFY_SITE_URL = process.env.NETLIFY_SITE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-let iyzipay = null;
+// Root + health (test için)
+app.get("/", (req, res) => res.send("LC Shop backend OK"));
+app.get("/health", (req, res) => res.json({ ok: true }));
 
+// IYZICO safe init (env yoksa çökmesin)
+let iyzipay = null;
 if (process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY && process.env.IYZICO_URI) {
   iyzipay = new Iyzipay({
     apiKey: process.env.IYZICO_API_KEY,
@@ -23,10 +27,8 @@ if (process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY && process.env.I
     uri: process.env.IYZICO_URI
   });
 } else {
-  console.log("IYZICO env missing: server will run, but checkout endpoints will be disabled.");
+  console.log("IYZICO env missing: checkout endpoints disabled until set.");
 }
-
-});
 
 /* GOOGLE LOGIN */
 passport.use(new GoogleStrategy({
@@ -34,9 +36,6 @@ passport.use(new GoogleStrategy({
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   callbackURL: "/auth/google/callback"
 }, (accessToken, refreshToken, profile, done) => done(null, profile)));
-app.get("/", (req, res) => {
-  res.send("LC Shop backend çalışıyor");
-});
 
 app.get("/auth/google",
   passport.authenticate("google", { scope: ["profile", "email"] })
@@ -45,17 +44,18 @@ app.get("/auth/google",
 app.get("/auth/google/callback",
   passport.authenticate("google", { session: false }),
   (req, res) => {
-    const email = req.user.emails[0].value;
-    const name = req.user.displayName || email.split("@")[0];
+    const email = req.user?.emails?.[0]?.value || "";
+    const name = req.user?.displayName || (email ? email.split("@")[0] : "LC Üye");
     const token = jwt.sign({ email, name }, JWT_SECRET, { expiresIn: "7d" });
-    res.redirect(`${NETLIFY_SITE_URL}/panel.html?token=${token}`);
+    res.redirect(`${NETLIFY_SITE_URL}/panel.html?token=${encodeURIComponent(token)}`);
   }
 );
 
-/* AUTH MIDDLEWARE */
+/* AUTH */
 function requireAuth(req, res, next){
   try{
-    const token = req.headers.authorization?.split(" ")[1];
+    const header = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
     if(!token) return res.status(401).json({ error: "unauthorized" });
     req.user = jwt.verify(token, JWT_SECRET);
     next();
@@ -66,10 +66,11 @@ function requireAuth(req, res, next){
 
 /* IYZICO CHECKOUT INIT */
 app.post("/api/iyzico/checkout-init", requireAuth, (req, res) => {
-    if (!iyzipay) return res.status(503).json({ error: "iyzico_not_configured" });
+  if(!iyzipay) return res.status(503).json({ error: "iyzico_not_configured" });
 
   const priceMap = { week: "99.00", month: "139.00", quarter: "269.00" };
-  const price = priceMap[req.body.plan] || "139.00";
+  const plan = req.body?.plan || "month";
+  const price = priceMap[plan] || "139.00";
 
   const request = {
     locale: "tr",
@@ -82,30 +83,30 @@ app.post("/api/iyzico/checkout-init", requireAuth, (req, res) => {
     callbackUrl: `${process.env.PUBLIC_BASE_URL}/api/iyzico/callback`,
     buyer: {
       id: "U" + Date.now(),
-      name: req.user.name,
+      name: req.user.name || "LC",
       surname: "User",
-      email: req.user.email,
+      email: req.user.email || "user@example.com",
       identityNumber: "11111111111",
       registrationAddress: "Digital",
-      ip: "127.0.0.1",
+      ip: req.headers["x-forwarded-for"]?.toString()?.split(",")[0] || req.socket.remoteAddress,
       city: "Istanbul",
       country: "Turkey"
     },
     shippingAddress: {
-      contactName: req.user.name,
+      contactName: req.user.name || "LC User",
       city: "Istanbul",
       country: "Turkey",
-      address: "Digital"
+      address: "Digital Delivery"
     },
     billingAddress: {
-      contactName: req.user.name,
+      contactName: req.user.name || "LC User",
       city: "Istanbul",
       country: "Turkey",
-      address: "Digital"
+      address: "Digital Delivery"
     },
     basketItems: [{
-      id: "P1",
-      name: "Discord Boost",
+      id: "P-" + plan,
+      name: `Discord Boost - ${plan}`,
       category1: "Digital",
       itemType: Iyzipay.BASKET_ITEM_TYPE.VIRTUAL,
       price
@@ -113,8 +114,8 @@ app.post("/api/iyzico/checkout-init", requireAuth, (req, res) => {
   };
 
   Iyzipay.CheckoutFormInitialize.create(request, iyzipay, (err, result) => {
-    if(err || result.status !== "success"){
-      return res.status(400).json({ error: "iyzico error" });
+    if(err || result?.status !== "success"){
+      return res.status(400).json({ error: result?.errorMessage || "iyzico_error" });
     }
     res.json({ checkoutFormContent: result.checkoutFormContent });
   });
@@ -122,22 +123,17 @@ app.post("/api/iyzico/checkout-init", requireAuth, (req, res) => {
 
 /* IYZICO CALLBACK */
 app.post("/api/iyzico/callback", express.urlencoded({ extended: true }), (req, res) => {
-  const token = req.body.token;
-  Iyzipay.CheckoutForm.retrieve({ token }, iyzipay, (err, result) => {
-    if(result?.paymentStatus === "SUCCESS"){
-      res.redirect(`${NETLIFY_SITE_URL}/success.html`);
-    }else{
-      res.redirect(`${NETLIFY_SITE_URL}/fail.html`);
+  if(!iyzipay) return res.redirect(`${NETLIFY_SITE_URL}/fail.html`);
+
+  const token = req.body?.token;
+  if(!token) return res.redirect(`${NETLIFY_SITE_URL}/fail.html`);
+
+  Iyzipay.CheckoutForm.retrieve({ locale: "tr", token }, iyzipay, (err, result) => {
+    if(result?.status === "success" && (result?.paymentStatus === "SUCCESS" || result?.paymentStatus === "success")){
+      return res.redirect(`${NETLIFY_SITE_URL}/success.html`);
     }
+    return res.redirect(`${NETLIFY_SITE_URL}/fail.html`);
   });
 });
-app.get("/", (req, res) => res.send("LC Shop backend OK"));
 
-/* HEALTH CHECK */
-app.get("/", (req,res)=>res.send("LCShop backend OK"));
-
-app.get("/health", (req,res)=>res.json({ ok:true }));
-
-app.listen(process.env.PORT || 3000, () =>
-  console.log("Backend running")
-);
+app.listen(process.env.PORT || 3000, () => console.log("Backend running"));
