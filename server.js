@@ -120,6 +120,8 @@ app.post("/api/iyzico/callback", express.urlencoded({ extended: true }), (req, r
 });
 
 /* HEALTH CHECK */
+app.get("/", (req,res)=>res.send("LCShop backend OK"));
+
 app.get("/health", (req,res)=>res.json({ ok:true }));
 
 app.listen(process.env.PORT || 3000, () =>
