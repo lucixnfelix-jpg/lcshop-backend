@@ -131,6 +131,7 @@ app.post("/api/iyzico/callback", express.urlencoded({ extended: true }), (req, r
     }
   });
 });
+app.get("/", (req, res) => res.send("LC Shop backend OK"));
 
 /* HEALTH CHECK */
 app.get("/", (req,res)=>res.send("LCShop backend OK"));
