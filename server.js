@@ -26,6 +26,9 @@ passport.use(new GoogleStrategy({
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   callbackURL: "/auth/google/callback"
 }, (accessToken, refreshToken, profile, done) => done(null, profile)));
+app.get("/", (req, res) => {
+  res.send("LC Shop backend çalışıyor");
+});
 
 app.get("/auth/google",
   passport.authenticate("google", { scope: ["profile", "email"] })
