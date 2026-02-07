@@ -14,10 +14,18 @@ app.use(passport.initialize());
 const NETLIFY_SITE_URL = process.env.NETLIFY_SITE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-const iyzipay = new Iyzipay({
-  apiKey: process.env.IYZICO_API_KEY,
-  secretKey: process.env.IYZICO_SECRET_KEY,
-  uri: process.env.IYZICO_URI
+let iyzipay = null;
+
+if (process.env.IYZICO_API_KEY && process.env.IYZICO_SECRET_KEY && process.env.IYZICO_URI) {
+  iyzipay = new Iyzipay({
+    apiKey: process.env.IYZICO_API_KEY,
+    secretKey: process.env.IYZICO_SECRET_KEY,
+    uri: process.env.IYZICO_URI
+  });
+} else {
+  console.log("IYZICO env missing: server will run, but checkout endpoints will be disabled.");
+}
+
 });
 
 /* GOOGLE LOGIN */
