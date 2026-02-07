@@ -66,6 +66,8 @@ function requireAuth(req, res, next){
 
 /* IYZICO CHECKOUT INIT */
 app.post("/api/iyzico/checkout-init", requireAuth, (req, res) => {
+    if (!iyzipay) return res.status(503).json({ error: "iyzico_not_configured" });
+
   const priceMap = { week: "99.00", month: "139.00", quarter: "269.00" };
   const price = priceMap[req.body.plan] || "139.00";
 
